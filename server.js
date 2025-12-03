@@ -7,26 +7,32 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 console.log("--> [SERVER] Iniciando Servidor Jogo Fácil...");
-console.log("--> [SERVER] Ambiente Node:", process.version);
+console.log("--> [SERVER] Node Version:", process.version);
 
+// Inicializa Prisma
 const prisma = new PrismaClient();
 const app = express();
+// Railway injeta a porta automaticamente na env PORT
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// --- Rota de Health Check ---
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
+// Health Check
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`; 
+    res.status(200).send('OK - DB Connected');
+  } catch (e) {
+    console.error("[HEALTH] DB Error:", e);
+    res.status(500).send('Error connecting to DB');
+  }
 });
 
-// --- Rotas de Autenticação ---
-
+// --- Auth Routes ---
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    console.log(`[LOGIN] Tentativa para: ${email}`);
     const user = await prisma.user.findUnique({
       where: { email },
       include: { subTeams: true }
@@ -40,13 +46,13 @@ app.post('/api/auth/login', async (req, res) => {
     }
   } catch (e) {
     console.error("[LOGIN ERROR]", e);
-    res.status(500).json({ error: 'Erro interno ao fazer login.' });
+    res.status(500).json({ error: 'Erro no servidor ao fazer login' });
   }
 });
 
 app.post('/api/auth/register', async (req, res) => {
   const data = req.body;
-  console.log(`[REGISTER] Tentativa para: ${data.email}`);
+  console.log(`[REGISTER] Iniciando cadastro para: ${data.email}`);
   
   try {
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
@@ -55,6 +61,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Create User
       const user = await tx.user.create({
         data: {
           email: data.email,
@@ -72,6 +79,7 @@ app.post('/api/auth/register', async (req, res) => {
         }
       });
 
+      // Create Field if Owner
       if (data.role === 'FIELD_OWNER' && data.fieldData) {
         await tx.field.create({
           data: {
@@ -98,36 +106,32 @@ app.post('/api/auth/register', async (req, res) => {
     });
     
     const { password, ...safeUser } = fullUser;
-    console.log(`[REGISTER SUCCESS] Usuário criado: ${safeUser.id}`);
+    console.log("[REGISTER] Sucesso!");
     res.json(safeUser);
 
   } catch (e) {
     console.error("[REGISTER ERROR]", e);
-    res.status(500).json({ error: `Erro ao criar conta: ${e.message}` });
+    res.status(500).json({ error: `Erro ao cadastrar: ${e.message}` });
   }
 });
 
+// --- User Routes ---
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phoneNumber, subTeams, subscription } = req.body;
-
   try {
     await prisma.user.update({
       where: { id },
       data: { name, phoneNumber, subscription }
     });
-
+    // Simples substituição de times (delete all + create new)
     await prisma.subTeam.deleteMany({ where: { userId: id } });
-    if (subTeams && subTeams.length > 0) {
+    if (subTeams?.length > 0) {
       await prisma.subTeam.createMany({
         data: subTeams.map(t => ({ name: t.name, category: t.category, userId: id }))
       });
     }
-
-    const updatedUser = await prisma.user.findUnique({
-      where: { id },
-      include: { subTeams: true }
-    });
+    const updatedUser = await prisma.user.findUnique({ where: { id }, include: { subTeams: true } });
     res.json(updatedUser);
   } catch (e) {
     console.error(e);
@@ -135,6 +139,7 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
+// --- Data Routes ---
 app.get('/api/fields', async (req, res) => {
   try {
     const fields = await prisma.field.findMany();
@@ -144,6 +149,7 @@ app.get('/api/fields', async (req, res) => {
     }));
     res.json(mapped);
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: 'Erro ao buscar campos' });
   }
 });
@@ -153,7 +159,8 @@ app.get('/api/slots', async (req, res) => {
     const slots = await prisma.matchSlot.findMany();
     res.json(slots);
   } catch (e) {
-    res.status(500).json({ error: 'Erro ao buscar horários' });
+    console.error(e);
+    res.status(500).json({ error: 'Erro ao buscar slots' });
   }
 });
 
@@ -165,12 +172,11 @@ app.post('/api/slots', async (req, res) => {
     } else {
       await prisma.matchSlot.create({ data: slotsData });
     }
-    
     const allSlots = await prisma.matchSlot.findMany();
     res.json(allSlots);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Erro ao criar horários' });
+    res.status(500).json({ error: 'Erro ao criar slot' });
   }
 });
 
@@ -178,17 +184,15 @@ app.put('/api/slots/:id', async (req, res) => {
   const { id } = req.params;
   const data = req.body;
   try {
-    const updated = await prisma.matchSlot.update({
-      where: { id },
-      data
-    });
+    const updated = await prisma.matchSlot.update({ where: { id }, data });
     res.json(updated);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Erro ao atualizar horário' });
+    res.status(500).json({ error: 'Erro ao atualizar slot' });
   }
 });
 
+// Fallback para React Router (SPA)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
