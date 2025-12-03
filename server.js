@@ -6,13 +6,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-console.log("--> [SERVER] Iniciando Servidor Jogo Fácil...");
-console.log("--> [SERVER] Node Version:", process.version);
+console.log("--> [SERVER] Iniciando Jogo Fácil...");
 
 // Inicializa Prisma
 const prisma = new PrismaClient();
 const app = express();
-// Railway injeta a porta automaticamente na env PORT
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
@@ -52,7 +50,6 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   const data = req.body;
-  console.log(`[REGISTER] Iniciando cadastro para: ${data.email}`);
   
   try {
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
@@ -60,6 +57,7 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Email já cadastrado' });
     }
 
+    // Convert fields to match Prisma schema
     const result = await prisma.$transaction(async (tx) => {
       // Create User
       const user = await tx.user.create({
@@ -71,8 +69,8 @@ app.post('/api/auth/register', async (req, res) => {
           phoneNumber: data.phoneNumber,
           subscription: data.subscription,
           subscriptionExpiry: data.subscriptionExpiry ? new Date(data.subscriptionExpiry) : null,
-          latitude: data.latitude || -23.55,
-          longitude: data.longitude || -46.63,
+          latitude: Number(data.latitude || -23.55),
+          longitude: Number(data.longitude || -46.63),
           subTeams: {
             create: data.subTeams?.map(t => ({ name: t.name, category: t.category })) || []
           }
@@ -106,7 +104,6 @@ app.post('/api/auth/register', async (req, res) => {
     });
     
     const { password, ...safeUser } = fullUser;
-    console.log("[REGISTER] Sucesso!");
     res.json(safeUser);
 
   } catch (e) {
@@ -124,7 +121,7 @@ app.put('/api/users/:id', async (req, res) => {
       where: { id },
       data: { name, phoneNumber, subscription }
     });
-    // Simples substituição de times (delete all + create new)
+    // Simples substituição de times
     await prisma.subTeam.deleteMany({ where: { userId: id } });
     if (subTeams?.length > 0) {
       await prisma.subTeam.createMany({
@@ -192,7 +189,7 @@ app.put('/api/slots/:id', async (req, res) => {
   }
 });
 
-// Fallback para React Router (SPA)
+// Fallback para SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
