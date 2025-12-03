@@ -1,0 +1,441 @@
+import React, { useState } from 'react';
+import { Search, MapPin, Clock, Check, AlertTriangle, X, MessageCircle, Filter, Trophy, Users, AlertCircle } from 'lucide-react';
+import { Button } from '../components/Button';
+import { Field, MatchSlot, VerificationResult, User, SubTeam, COMMON_CATEGORIES } from '../types';
+import { verifyPixReceipt } from '../services/aiService';
+import { calculateDistance } from '../utils';
+
+interface TeamDashboardProps {
+  currentUser: User;
+  fields: Field[];
+  slots: MatchSlot[];
+  onBookSlot: (slotId: string, team: SubTeam, receipt?: File) => void;
+  userLocation?: { lat: number, lng: number };
+}
+
+export const TeamDashboard: React.FC<TeamDashboardProps> = ({ currentUser, fields, slots, onBookSlot, userLocation }) => {
+  // Tabs: 'SEARCH' | 'MY_BOOKINGS'
+  const [activeTab, setActiveTab] = useState<'SEARCH' | 'MY_BOOKINGS'>('SEARCH');
+
+  // Search & Filter State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [radiusFilter, setRadiusFilter] = useState<number>(50); // km
+  const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [timeFilter, setTimeFilter] = useState<'ALL' | 'MORNING' | 'AFTERNOON' | 'NIGHT'>('ALL');
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Booking State
+  const [selectedSlot, setSelectedSlot] = useState<MatchSlot | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  
+  // AI Verification State
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setReceiptFile(e.target.files[0]);
+      setVerificationResult(null); 
+    }
+  };
+
+  const handleVerifyPayment = async () => {
+    if (!receiptFile || !selectedSlot) return;
+    const field = fields.find(f => f.id === selectedSlot.fieldId);
+    if (!field) return;
+    setIsVerifying(true);
+    const result = await verifyPixReceipt(receiptFile, selectedSlot.price, field.pixConfig.name);
+    setVerificationResult(result);
+    setIsVerifying(false);
+  };
+
+  const handleFinalizeBooking = () => {
+    const team = currentUser.subTeams.find(t => t.id === selectedTeamId);
+    if (selectedSlot && verificationResult?.isValid && team) {
+      onBookSlot(selectedSlot.id, team, receiptFile!);
+      setSelectedSlot(null);
+      setVerificationResult(null);
+      setReceiptFile(null);
+      setSelectedTeamId('');
+    }
+  };
+
+  const handleWhatsAppField = (field: Field) => {
+     if(!field.contactPhone) return;
+     const cleanPhone = field.contactPhone.replace(/\D/g, '');
+     const text = `Olá, vi seu campo ${field.name} no Jogo Fácil e tenho uma dúvida.`;
+     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+     window.open(url, '_blank');
+  };
+
+  // --- Filtering Logic ---
+  const getFilteredSlots = () => {
+    return slots.filter(slot => {
+      const field = fields.find(f => f.id === slot.fieldId);
+      if (!field) return false;
+      if (slot.status !== 'available') return false;
+
+      if (searchTerm && !field.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+      if (userLocation) {
+        const dist = calculateDistance(userLocation.lat, userLocation.lng, field.latitude, field.longitude);
+        if (dist > radiusFilter) return false;
+      }
+
+      // Check intersection of allowed categories if filter is applied
+      if (categoryFilter && !slot.allowedCategories.includes(categoryFilter) && !slot.allowedCategories.includes('Livre')) return false;
+
+      const hour = parseInt(slot.time.split(':')[0]);
+      if (timeFilter === 'MORNING' && hour >= 12) return false;
+      if (timeFilter === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
+      if (timeFilter === 'NIGHT' && hour < 18) return false;
+
+      return true;
+    });
+  };
+
+  const getMyBookings = () => {
+    return slots.filter(slot => slot.bookedByUserId === currentUser.id);
+  };
+
+  const filteredSlots = getFilteredSlots();
+  const myBookings = getMyBookings();
+  const inputClass = "w-full bg-gray-700 border border-gray-600 rounded-lg p-2 text-white placeholder-gray-400 focus:ring-2 focus:ring-grass-500 outline-none";
+
+  // Calculate available teams for the selected slot
+  const getEligibleTeams = () => {
+    if (!selectedSlot) return [];
+    if (selectedSlot.allowedCategories.includes('Livre')) return currentUser.subTeams;
+    
+    return currentUser.subTeams.filter(team => 
+      selectedSlot.allowedCategories.includes(team.category)
+    );
+  };
+
+  const eligibleTeams = getEligibleTeams();
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      
+      {/* Sub-Nav Tabs */}
+      <div className="flex gap-4 mb-6 border-b border-gray-300 pb-1">
+        <button 
+          onClick={() => setActiveTab('SEARCH')}
+          className={`pb-2 px-4 font-bold transition ${activeTab === 'SEARCH' ? 'text-grass-600 border-b-2 border-grass-600' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          Buscar Jogos
+        </button>
+        <button 
+          onClick={() => setActiveTab('MY_BOOKINGS')}
+          className={`pb-2 px-4 font-bold transition ${activeTab === 'MY_BOOKINGS' ? 'text-grass-600 border-b-2 border-grass-600' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          Meus Agendamentos
+        </button>
+      </div>
+
+      {activeTab === 'SEARCH' && (
+        <>
+          <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border space-y-4">
+             <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por nome da arena..." 
+                    className="w-full pl-10 p-3 rounded-xl border border-gray-200 bg-gray-50 outline-none focus:ring-2 focus:ring-grass-500" 
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Button variant="secondary" onClick={() => setShowFilters(!showFilters)}>
+                  <Filter className="w-4 h-4" /> Filtros
+                </Button>
+             </div>
+
+             {showFilters && (
+               <div className="grid md:grid-cols-3 gap-4 pt-4 border-t">
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 mb-1 block">Raio de Distância</label>
+                    <div className="flex items-center gap-2">
+                       <input 
+                         type="range" min="1" max="100" 
+                         value={radiusFilter} onChange={e => setRadiusFilter(Number(e.target.value))}
+                         className="flex-1"
+                       />
+                       <span className="text-sm font-bold w-16">{radiusFilter} km</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 mb-1 block">Categoria</label>
+                    <select 
+                      className="w-full p-2 rounded border bg-white"
+                      value={categoryFilter}
+                      onChange={e => setCategoryFilter(e.target.value)}
+                    >
+                       <option value="">Todas</option>
+                       {COMMON_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-gray-600 mb-1 block">Período</label>
+                    <select 
+                      className="w-full p-2 rounded border bg-white"
+                      value={timeFilter}
+                      onChange={e => setTimeFilter(e.target.value as any)}
+                    >
+                       <option value="ALL">Qualquer horário</option>
+                       <option value="MORNING">Manhã (Até 12h)</option>
+                       <option value="AFTERNOON">Tarde (12h - 18h)</option>
+                       <option value="NIGHT">Noite (Após 18h)</option>
+                    </select>
+                  </div>
+               </div>
+             )}
+          </div>
+
+          <div className="grid gap-4">
+            {filteredSlots.map(slot => {
+              const field = fields.find(f => f.id === slot.fieldId);
+              if (!field) return null;
+              
+              const dist = userLocation 
+                ? calculateDistance(userLocation.lat, userLocation.lng, field.latitude, field.longitude)
+                : null;
+
+              const isOwner = field.ownerId === currentUser.id;
+
+              return (
+                <div key={slot.id} className="bg-white p-4 rounded-xl border hover:shadow-md transition flex flex-col md:flex-row justify-between items-stretch gap-4">
+                  <div className="flex items-start gap-4 flex-1">
+                    <img src={field.imageUrl} alt={field.name} className="w-24 h-24 rounded-lg object-cover bg-gray-200" />
+                    <div>
+                      <h3 className="font-bold text-lg text-pitch">{field.name}</h3>
+                      <div className="flex flex-col text-sm text-gray-500 gap-1 mt-1">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3" /> {field.location} 
+                          {dist !== null && <span className="text-grass-600 font-bold ml-1">({dist} km)</span>}
+                        </span>
+                        <span className="flex items-center gap-1 font-semibold text-gray-700">
+                          <Clock className="w-3 h-3" /> {slot.date.split('-').reverse().join('/')} às {slot.time}
+                        </span>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {slot.allowedCategories.map(cat => (
+                           <span key={cat} className="text-[10px] uppercase font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
+                             {cat}
+                           </span>
+                        ))}
+                      </div>
+
+                      {slot.hasLocalTeam && (
+                        <div className="mt-2 text-indigo-700 text-xs font-bold flex items-center gap-1">
+                          <Trophy className="w-3 h-3" /> Desafio vs {slot.localTeamName || 'Time da Casa'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col justify-between items-end min-w-[140px] border-l pl-4 border-gray-100">
+                     <div className="text-right">
+                        <span className="text-xs text-gray-400 uppercase">Preço</span>
+                        <p className="text-2xl font-bold text-grass-700">R$ {slot.price}</p>
+                     </div>
+                     <div className="flex flex-col gap-2 w-full">
+                       {field.contactPhone && !isOwner && (
+                        <button onClick={() => handleWhatsAppField(field)} className="text-green-600 text-xs font-bold hover:underline flex items-center justify-end gap-1">
+                            <MessageCircle className="w-3 h-3" /> Dúvidas?
+                        </button>
+                       )}
+                       <Button 
+                          size="sm" 
+                          className={`w-full ${isOwner ? 'bg-gray-400 cursor-not-allowed hover:bg-gray-400 shadow-none' : ''}`} 
+                          onClick={() => setSelectedSlot(slot)}
+                          disabled={isOwner}
+                       >
+                         {isOwner ? 'Seu Campo' : 'Reservar'}
+                       </Button>
+                     </div>
+                  </div>
+                </div>
+              );
+            })}
+            {filteredSlots.length === 0 && (
+              <div className="text-center py-10 text-gray-500">
+                Nenhum jogo encontrado com esses filtros. Tente aumentar o raio de distância.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'MY_BOOKINGS' && (
+        <div className="space-y-4">
+           {myBookings.length === 0 ? (
+             <div className="text-center py-12 bg-gray-100 rounded-xl">
+               <p className="text-gray-500">Você ainda não agendou nenhum jogo.</p>
+               <Button variant="outline" className="mt-4" onClick={() => setActiveTab('SEARCH')}>Buscar Jogos</Button>
+             </div>
+           ) : (
+             myBookings.map(slot => {
+               const field = fields.find(f => f.id === slot.fieldId);
+               return (
+                 <div key={slot.id} className="bg-white p-5 rounded-xl border shadow-sm flex justify-between items-center">
+                    <div>
+                       <h3 className="font-bold text-lg">{field?.name}</h3>
+                       <p className="text-gray-600 flex items-center gap-2">
+                         <Clock className="w-4 h-4"/> {slot.date} - {slot.time}
+                       </p>
+                       <div className="mt-2 flex gap-2">
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            slot.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {slot.status === 'confirmed' ? 'Confirmado' : 'Aguardando Confirmação'}
+                          </span>
+                          <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                             <Users className="w-3 h-3"/> {slot.bookedByTeamName} ({slot.bookedByCategory})
+                          </span>
+                       </div>
+                    </div>
+                    <div className="text-right">
+                       <p className="font-bold text-xl">R$ {slot.price}</p>
+                    </div>
+                 </div>
+               )
+             })
+           )}
+        </div>
+      )}
+
+      {/* Booking Modal */}
+      {selectedSlot && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto text-white">
+            <div className="bg-pitch p-4 flex justify-between items-center sticky top-0 z-10 border-b border-gray-700">
+              <h3 className="text-white font-bold text-lg">Confirmar Agendamento</h3>
+              <button onClick={() => setSelectedSlot(null)} className="text-white/70 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="mb-6 bg-gray-700 p-4 rounded-lg border border-gray-600">
+                <p className="text-sm text-gray-400 mb-1">Detalhes do Jogo</p>
+                <div className="flex justify-between font-semibold">
+                   <span>{fields.find(f => f.id === selectedSlot.fieldId)?.name}</span>
+                   <span>{selectedSlot.date} - {selectedSlot.time}</span>
+                </div>
+                <div className="mt-2 text-right text-grass-400 font-bold text-xl">
+                  R$ {selectedSlot.price},00
+                </div>
+                <div className="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
+                   Permitido: {selectedSlot.allowedCategories.join(', ')}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-gray-300">Qual time vai jogar?</label>
+                  
+                  {eligibleTeams.length > 0 ? (
+                    <select 
+                      className={inputClass}
+                      value={selectedTeamId}
+                      onChange={e => setSelectedTeamId(e.target.value)}
+                    >
+                       <option value="" disabled>Selecione um time</option>
+                       {eligibleTeams.map(t => (
+                         <option key={t.id} value={t.id}>{t.name} ({t.category})</option>
+                       ))}
+                    </select>
+                  ) : (
+                    <div className="bg-red-900/20 border border-red-500/50 p-3 rounded text-red-200 text-sm flex items-start gap-2">
+                       <AlertTriangle className="w-5 h-5 shrink-0" />
+                       <p>Você não tem nenhum time nas categorias permitidas para este jogo ({selectedSlot.allowedCategories.join(', ')}). Vá em Editar Perfil para cadastrar um time compatível.</p>
+                    </div>
+                  )}
+                  
+                  {currentUser.subTeams?.length === 0 && (
+                     <p className="text-xs text-yellow-500 mt-1">Dica: Adicione seus times no seu perfil para facilitar.</p>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-600 pt-4">
+                  <p className="font-semibold mb-2 flex items-center gap-2">
+                    <span className="bg-yellow-600 text-white text-xs px-2 py-1 rounded">Passo 1</span>
+                    Faça o PIX
+                  </p>
+                  <div className="bg-gray-900 p-3 rounded text-sm break-all font-mono text-center text-gray-200 border border-gray-700">
+                    {fields.find(f => f.id === selectedSlot.fieldId)?.pixConfig.key}
+                  </div>
+                  <p className="text-xs text-center text-gray-400 mt-1">
+                    Beneficiário: {fields.find(f => f.id === selectedSlot.fieldId)?.pixConfig.name}
+                  </p>
+                </div>
+
+                <div>
+                   <p className="font-semibold mb-2 flex items-center gap-2">
+                    <span className="bg-yellow-600 text-white text-xs px-2 py-1 rounded">Passo 2</span>
+                    Envie o Comprovante para Análise da IA
+                  </p>
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="block w-full text-sm text-gray-400
+                      file:mr-4 file:py-2 file:px-4
+                      file:rounded-full file:border-0
+                      file:text-sm file:font-semibold
+                      file:bg-grass-600 file:text-white
+                      hover:file:bg-grass-700 cursor-pointer"
+                  />
+                </div>
+
+                {receiptFile && !verificationResult && (
+                  <Button 
+                    variant="secondary" 
+                    className="w-full bg-gray-600 hover:bg-gray-500 text-white" 
+                    onClick={handleVerifyPayment}
+                    isLoading={isVerifying}
+                  >
+                    Validar Comprovante com IA
+                  </Button>
+                )}
+
+                {verificationResult && (
+                  <div className={`p-4 rounded-lg border ${verificationResult.isValid ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
+                    <div className="flex items-start gap-3">
+                      {verificationResult.isValid ? (
+                        <Check className="w-5 h-5 text-green-400 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5" />
+                      )}
+                      <div>
+                        <h4 className={`font-bold ${verificationResult.isValid ? 'text-green-300' : 'text-red-300'}`}>
+                          {verificationResult.isValid ? "Comprovante Validado!" : "Problema no Comprovante"}
+                        </h4>
+                        <p className="text-sm text-gray-300 mt-1">{verificationResult.reason}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6">
+                <Button 
+                  className="w-full" 
+                  disabled={!verificationResult?.isValid || !selectedTeamId}
+                  onClick={handleFinalizeBooking}
+                >
+                  Confirmar Jogo
+                </Button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

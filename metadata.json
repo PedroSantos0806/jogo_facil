@@ -1,0 +1,8 @@
+{
+  "name": "Jogo Fácil",
+  "description": "Sistema de agendamento de partidas de futebol com verificação de pagamento via IA.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
