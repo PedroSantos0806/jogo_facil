@@ -6,27 +6,27 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Log para debug inicial
-console.log("Iniciando servidor...");
+console.log("--> [SERVER] Iniciando Servidor Jogo Fácil...");
+console.log("--> [SERVER] Ambiente Node:", process.version);
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-
-// Serve static files from the React app build
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// --- API ROUTES ---
+// --- Rota de Health Check ---
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
-// Health Check (Para o Railway saber que está vivo)
-app.get('/health', (req, res) => res.send('OK'));
+// --- Rotas de Autenticação ---
 
-// Auth: Login
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
+    console.log(`[LOGIN] Tentativa para: ${email}`);
     const user = await prisma.user.findUnique({
       where: { email },
       include: { subTeams: true }
@@ -39,27 +39,22 @@ app.post('/api/auth/login', async (req, res) => {
       res.status(401).json({ error: 'Credenciais inválidas' });
     }
   } catch (e) {
-    console.error("Login Error:", e);
-    res.status(500).json({ error: 'Erro no servidor ao fazer login.' });
+    console.error("[LOGIN ERROR]", e);
+    res.status(500).json({ error: 'Erro interno ao fazer login.' });
   }
 });
 
-// Auth: Register
 app.post('/api/auth/register', async (req, res) => {
   const data = req.body;
-  console.log("Tentativa de registro:", data.email, data.role);
+  console.log(`[REGISTER] Tentativa para: ${data.email}`);
   
   try {
-    // 1. Check existing
     const existing = await prisma.user.findUnique({ where: { email: data.email } });
     if (existing) {
-      console.log("Usuário já existe:", data.email);
       return res.status(400).json({ error: 'Email já cadastrado' });
     }
 
-    // 2. Transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Create User
       const user = await tx.user.create({
         data: {
           email: data.email,
@@ -77,9 +72,7 @@ app.post('/api/auth/register', async (req, res) => {
         }
       });
 
-      // Create Field if needed
       if (data.role === 'FIELD_OWNER' && data.fieldData) {
-        console.log("Criando campo para usuário:", user.id);
         await tx.field.create({
           data: {
             name: data.fieldData.name,
@@ -88,37 +81,32 @@ app.post('/api/auth/register', async (req, res) => {
             cancellationFeePercent: Number(data.fieldData.cancellationFeePercent),
             pixKey: data.fieldData.pixConfig.key,
             pixName: data.fieldData.pixConfig.name,
-            imageUrl: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?q=80&w=1470&auto=format&fit=crop', // Imagem padrão melhor
+            imageUrl: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?q=80&w=1470&auto=format&fit=crop',
             contactPhone: data.fieldData.contactPhone,
-            latitude: user.latitude || 0,
-            longitude: user.longitude || 0,
+            latitude: user.latitude,
+            longitude: user.longitude,
             ownerId: user.id
           }
         });
       }
-
       return user;
     });
 
-    console.log("Registro sucesso:", result.id);
-    
-    // 3. Return full object
-    const { password, ...userWithoutPass } = result;
     const fullUser = await prisma.user.findUnique({
       where: { id: result.id },
       include: { subTeams: true }
     });
     
-    res.json(fullUser);
+    const { password, ...safeUser } = fullUser;
+    console.log(`[REGISTER SUCCESS] Usuário criado: ${safeUser.id}`);
+    res.json(safeUser);
 
   } catch (e) {
-    console.error("Registration Critical Error:", e);
-    // Retornar o erro exato ajuda a debugar
-    res.status(500).json({ error: `Erro no banco de dados: ${e.message}` });
+    console.error("[REGISTER ERROR]", e);
+    res.status(500).json({ error: `Erro ao criar conta: ${e.message}` });
   }
 });
 
-// Update User
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { name, phoneNumber, subTeams, subscription } = req.body;
@@ -142,12 +130,11 @@ app.put('/api/users/:id', async (req, res) => {
     });
     res.json(updatedUser);
   } catch (e) {
-    console.error("Update User Error:", e);
+    console.error(e);
     res.status(500).json({ error: 'Erro ao atualizar usuário' });
   }
 });
 
-// Get Fields
 app.get('/api/fields', async (req, res) => {
   try {
     const fields = await prisma.field.findMany();
@@ -157,38 +144,36 @@ app.get('/api/fields', async (req, res) => {
     }));
     res.json(mapped);
   } catch (e) {
-    console.error("Get Fields Error:", e);
     res.status(500).json({ error: 'Erro ao buscar campos' });
   }
 });
 
-// Get Slots
 app.get('/api/slots', async (req, res) => {
   try {
     const slots = await prisma.matchSlot.findMany();
     res.json(slots);
   } catch (e) {
-    console.error("Get Slots Error:", e);
     res.status(500).json({ error: 'Erro ao buscar horários' });
   }
 });
 
-// Create Slots
 app.post('/api/slots', async (req, res) => {
   const slotsData = req.body;
   try {
-    await prisma.matchSlot.createMany({
-      data: slotsData
-    });
+    if (Array.isArray(slotsData)) {
+      await prisma.matchSlot.createMany({ data: slotsData });
+    } else {
+      await prisma.matchSlot.create({ data: slotsData });
+    }
+    
     const allSlots = await prisma.matchSlot.findMany();
     res.json(allSlots);
   } catch (e) {
-    console.error("Create Slots Error:", e);
+    console.error(e);
     res.status(500).json({ error: 'Erro ao criar horários' });
   }
 });
 
-// Update Slot
 app.put('/api/slots/:id', async (req, res) => {
   const { id } = req.params;
   const data = req.body;
@@ -199,16 +184,15 @@ app.put('/api/slots/:id', async (req, res) => {
     });
     res.json(updated);
   } catch (e) {
-    console.error("Update Slot Error:", e);
+    console.error(e);
     res.status(500).json({ error: 'Erro ao atualizar horário' });
   }
 });
 
-// Catch-all handler for React
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[SERVER] Rodando na porta ${PORT}`);
 });
