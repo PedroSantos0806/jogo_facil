@@ -44,12 +44,16 @@ export const api = {
 
     // 3. Insert SubTeams
     if (subTeams && subTeams.length > 0) {
-      const teamsToInsert = subTeams.map((t: any) => ({
-        name: t.name,
-        category: t.category,
-        logoUrl: t.logoUrl, // New field
-        userId: newUser.id
-      }));
+      const teamsToInsert = subTeams.map((t: any) => {
+        // Sanitize: remove logoUrl se a coluna não existir no banco
+        const { logoUrl, ...rest } = t;
+        return {
+          name: t.name,
+          category: t.category,
+          // logoUrl: t.logoUrl, // Comentado para evitar erro de coluna inexistente
+          userId: newUser.id
+        };
+      });
       await supabase.from('SubTeam').insert(teamsToInsert);
     }
 
@@ -99,12 +103,16 @@ export const api = {
     // Sync teams (Delete all and recreate - simple approach)
     await supabase.from('SubTeam').delete().eq('userId', user.id);
     if (subTeams && subTeams.length > 0) {
-        const teamsToInsert = subTeams.map((t: any) => ({
-            name: t.name,
-            category: t.category,
-            logoUrl: t.logoUrl,
-            userId: user.id
-        }));
+        const teamsToInsert = subTeams.map((t: any) => {
+            // Sanitize
+            const { logoUrl, ...rest } = t;
+            return {
+                name: t.name,
+                category: t.category,
+                // logoUrl: t.logoUrl, // Comentado
+                userId: user.id
+            };
+        });
         await supabase.from('SubTeam').insert(teamsToInsert);
     }
 
@@ -128,7 +136,14 @@ export const api = {
   },
 
   createSlots: async (slots: Partial<MatchSlot>[]): Promise<MatchSlot[]> => {
-    const { data, error } = await supabase.from('MatchSlot').insert(slots).select();
+    // Sanitização: Remove customImageUrl antes de enviar para o Supabase
+    // pois a coluna não existe no banco de dados atual.
+    const sanitizedSlots = slots.map(slot => {
+        const { customImageUrl, ...rest } = slot;
+        return rest;
+    });
+
+    const { data, error } = await supabase.from('MatchSlot').insert(sanitizedSlots).select();
     if (error) throw new Error('Erro ao criar horários: ' + error.message);
     
     // Return all slots to refresh UI
@@ -137,9 +152,12 @@ export const api = {
   },
 
   updateSlot: async (slotId: string, data: Partial<MatchSlot>): Promise<MatchSlot> => {
+    // Sanitização também no update
+    const { customImageUrl, ...rest } = data;
+
     const { data: updated, error } = await supabase
       .from('MatchSlot')
-      .update(data)
+      .update(rest)
       .eq('id', slotId)
       .select()
       .single();
