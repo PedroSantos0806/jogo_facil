@@ -218,10 +218,6 @@ export const TeamDashboard: React.FC<TeamDashboardProps> = ({ currentUser, field
               const field = fields.find(f => f.id === slot.fieldId);
               if (!field) return null;
               
-              const dist = userLocation 
-                ? calculateDistance(userLocation.lat, userLocation.lng, field.latitude, field.longitude)
-                : null;
-
               const isOwner = field.ownerId === currentUser.id;
 
               return (
@@ -241,7 +237,6 @@ export const TeamDashboard: React.FC<TeamDashboardProps> = ({ currentUser, field
                           >
                              <ExternalLink className="w-3 h-3" />
                           </button>
-                          {dist !== null && <span className="text-grass-600 font-bold ml-1">({dist} km)</span>}
                         </div>
                         <span className="flex items-center gap-1 font-semibold text-gray-700">
                           <Clock className="w-3 h-3" /> {slot.date.split('-').reverse().join('/')} às {slot.time} <span className="text-gray-400 font-normal">({slot.durationMinutes} min)</span>
