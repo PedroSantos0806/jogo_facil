@@ -270,7 +270,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin, onCancel }) => {
                      <div>
                        <label className="block text-sm font-medium text-gray-300 mb-1">Valor por Hora (R$)</label>
                        <div className="relative">
-                         <DollarSign className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
+                         <DollarSign className="absolute left-3 top-3 text-gray-400 w-4 h-4" />
                          <input type="number" required className={inputClass} placeholder="150" value={hourlyRate} onChange={e => setHourlyRate(e.target.value)} />
                        </div>
                      </div>
@@ -307,7 +307,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin, onCancel }) => {
             <button 
               type="button"
               onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
-              className="text-sm text-grass-400 hover:text-grass-300 font-semibold"
+              className="text-sm text-white hover:text-grass-300 font-semibold"
             >
               {isRegistering ? 'Já tenho conta? Entrar' : 'Não tem conta? Cadastre-se'}
             </button>

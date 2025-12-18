@@ -22,19 +22,29 @@ const App: React.FC = () => {
   const [slots, setSlots] = useState<MatchSlot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Init Data
+  // Geolocation Watcher
+  useEffect(() => {
+    if (navigator.geolocation) {
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setUserLocation({ 
+            lat: pos.coords.latitude, 
+            lng: pos.coords.longitude 
+          });
+        },
+        (err) => console.log("Erro ao acessar localização:", err),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, []);
+
+  // Init User Session
   useEffect(() => {
     const storedUser = storageService.getCurrentUser();
     if (storedUser) {
       handleAuthSuccess(storedUser);
-    }
-
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        (err) => console.log("Location access denied", err),
-        { enableHighAccuracy: false }
-      );
     }
   }, []);
 
@@ -57,11 +67,6 @@ const App: React.FC = () => {
     setUser(loggedUser);
     storageService.setCurrentUser(loggedUser);
     
-    // Logic: 
-    // If Admin -> App
-    // If Team Captain -> Must have PRO_TEAM subscription to access
-    // If Field Owner -> Free access (PRO_FIELD or FREE)
-    
     if (loggedUser.role === UserRole.TEAM_CAPTAIN) {
         if (loggedUser.subscription === SubscriptionPlan.NONE || loggedUser.subscription === SubscriptionPlan.FREE) {
             setView('SUBSCRIPTION');
@@ -69,7 +74,6 @@ const App: React.FC = () => {
         }
     }
     
-    // Field owners or Paid Team Captains go here
     setView('APP');
     setCurrentTab(loggedUser.role === UserRole.FIELD_OWNER ? 'MY_FIELD' : 'SEARCH');
     refreshData();
@@ -114,12 +118,8 @@ const App: React.FC = () => {
     refreshData();
   };
 
-  // --- Actions ---
-
   const addSlot = async (newSlot: Omit<MatchSlot, 'id'>, isRecurring: boolean) => {
     const slotsToCreate: any[] = [];
-    
-    // Slot 1
     slotsToCreate.push(newSlot);
 
     if (isRecurring) {
@@ -127,21 +127,15 @@ const App: React.FC = () => {
         const dateObj = new Date(newSlot.date);
         dateObj.setDate(dateObj.getDate() + (i * 7)); 
         const nextDate = dateObj.toISOString().split('T')[0];
-        
-        slotsToCreate.push({
-          ...newSlot,
-          date: nextDate
-        });
+        slotsToCreate.push({ ...newSlot, date: nextDate });
       }
     }
     
     try {
       await api.createSlots(slotsToCreate);
-      // Force refresh to guarantee UI sync
       await refreshData();
     } catch (e: any) {
-      console.error("Erro ao criar slot:", e);
-      alert(`Erro ao criar horário: ${e.message || "Verifique se a tabela MatchSlot possui as colunas 'customImageUrl' e 'matchType'."}`);
+      alert(`Erro ao criar horário: ${e.message}`);
     }
   };
 
@@ -157,7 +151,6 @@ const App: React.FC = () => {
   const confirmBooking = async (slotId: string) => {
     try {
       await api.updateSlot(slotId, { status: 'confirmed' });
-      // Update local state directly for speed, refresh background
       setSlots(prev => prev.map(s => s.id === slotId ? { ...s, status: 'confirmed' } : s));
     } catch(e) { alert("Erro ao confirmar"); }
   };
