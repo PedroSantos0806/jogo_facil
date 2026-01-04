@@ -1,8 +1,9 @@
 {
   "name": "Jogo Fácil",
-  "description": "Sistema de agendamento de partidas de futebol com verificação de pagamento via IA.",
+  "description": "Sistema de agendamento de partidas de futebol otimizado para mobile.",
   "requestFramePermissions": [
     "camera",
     "geolocation"
-  ]
+  ],
+  "mobileEnabled": true
 }
